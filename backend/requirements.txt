@@ -1,0 +1,3 @@
+modal
+supabase
+python-dotenv
