@@ -1,65 +1,42 @@
-import modal
-import os
+from modal import App, web_endpoint, Secret, Image
+import os 
 from supabase import create_client, Client
 
-# Modal app
-app = modal.App("adaptive-health")
-
-# Define image with dependencies
-image = modal.Image.debian_slim().pip_install(
+image = Image.debian_slim(python_version="3.12").pip_install(
     "supabase",
-    "python-dotenv"
+    "fastapi"
 )
 
-# Supabase client initialization
-def get_supabase() -> Client:
-    url = os.environ.get("SUPABASE_URL")
-    key = os.environ.get("SUPABASE_API_KEY")
+app = App("backend-app", image=image)
+
+
+
+def get_supabase_client() -> Client:
+    url = os.environ["SUPABASE_URL"]
+    key = os.environ["SUPABASE_API_KEY"]
     return create_client(url, key)
 
 @app.function(
-    image=image,
-    secrets=[modal.Secret.from_name("supabase-secrets")]
+    secrets=[Secret.from_name("supabase-secret")]
 )
-@modal.web_endpoint(method="POST")
-def process_message(data: dict):
-    """Simple endpoint that processes a message"""
-    
-    # Get message from request
-    message = data.get("message", "")
-    
-    # Example: Use Supabase
-    supabase = get_supabase()
-    
-    # Simple processing
-    result = f"Processed: {message}"
-    
-    # Could save to Supabase here
-    # supabase.table('health_records').insert({...}).execute()
-    
-    return {"result": result, "status": "success"}
+@web_endpoint(method="POST")
+def create_item(item: dict):
+    try:
+        supabase_client = get_supabase_client()
+        result = supabase_client.table("items").insert(item).execute()
+        return {"success": True, "data": result.data}
+    except Exception as exc:
+        return {"success": False, "error": str(exc)}, 400 
 
 @app.function(
-    image=image,
-    secrets=[modal.Secret.from_name("supabase-secrets")]
+    secrets=[Secret.from_name("supabase-secret")]
 )
-@modal.web_endpoint(method="GET")
-def health_check():
-    """Health check endpoint"""
-    return {"status": "healthy"}
-
-@app.function(
-    image=image,
-    secrets=[modal.Secret.from_name("supabase-secrets")]
-)
-@modal.web_endpoint(method="GET")
-def get_fake_data(client):
-    """Get all fake data from Supabase"""
-    
-    
-    response = client.table('fake_data').select("*").execute()
-    
-    return {
-        "data": response.data,
-        "count": len(response.data)
-    }
+@web_endpoint(method="GET")
+def get_items():
+    """Example: Get all items from Supabase"""
+    try:
+        supabase_client = get_supabase_client()
+        result = supabase_client.table("items").select("*").execute()
+        return {"success": True, "data": result.data}
+    except Exception as e:
+        return {"success": False, "error": str(e)}, 400
