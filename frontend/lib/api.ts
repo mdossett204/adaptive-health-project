@@ -3,7 +3,7 @@ const ENDPOINTS = {
   LOGIN: process.env.NEXT_PUBLIC_MODAL_LOGIN_URL!,
   REFRESH_TOKEN: process.env.NEXT_PUBLIC_MODAL_REFRESH_TOKEN_URL!,
   CREATE_ITEM: process.env.NEXT_PUBLIC_MODAL_CREATE_ITEM_URL!,
-  GET_ITEMS: process.env.NEXT_PUBLIC_MODAL_GET_ITEMS_URL!,
+  GET_ITEMS: process.env.NEXT_PUBLIC_MODAL_GET_ITEM_URL!,
 };
 
 interface ApiResponse<T = unknown> {
