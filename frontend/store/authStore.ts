@@ -1,6 +1,5 @@
-// store/authStore.ts - First draft structure
 import { create } from "zustand";
-import { persist } from "zustand/middleware";
+import { apiClient } from "@/lib/api";
 
 interface User {
   id: string;
@@ -8,44 +7,128 @@ interface User {
 }
 
 interface AuthState {
-  accessToken: string | null;
-  refreshToken: string | null;
   user: User | null;
+  isAuthenticated: boolean;
+  isLoading: boolean;
+  error: string | null;
 
   // Actions
-  setTokens: (accessToken: string, refreshToken: string, user: User) => void;
-  clearAuth: () => void;
-  isTokenExpired: () => boolean;
+  signup: (email: string, password: string) => Promise<void>;
+  login: (email: string, password: string) => Promise<void>;
+  logout: () => void;
+  clearError: () => void;
+  setUser: (user: User | null) => void;
+  checkAuth: () => Promise<void>;
+  initialize: () => Promise<void>;
 }
 
-export const useAuthStore = create<AuthState>()(
-  persist(
-    (set, get) => ({
-      accessToken: null,
-      refreshToken: null,
-      user: null,
+export const useAuthStore = create<AuthState>((set) => ({
+  user: null,
+  isAuthenticated: false,
+  isLoading: false,
+  error: null,
 
-      setTokens: (accessToken, refreshToken, user) =>
-        set({ accessToken, refreshToken, user }),
+  signup: async (email: string, password: string) => {
+    set({ isLoading: true, error: null });
+    try {
+      await apiClient.signup(email, password);
 
-      clearAuth: () =>
-        set({ accessToken: null, refreshToken: null, user: null }),
+      // Signup with Supabase requires email confirmation
+      // Tokens are not returned until user confirms email and logs in
+      set({
+        isLoading: false,
+        error: null,
+      });
 
-      isTokenExpired: () => {
-        const token = get().accessToken;
-        if (!token) return true;
-
-        try {
-          const payload = JSON.parse(atob(token.split(".")[1]));
-          // Add 60 second buffer before actual expiry
-          return payload.exp * 1000 < Date.now() + 60000;
-        } catch {
-          return true;
-        }
-      },
-    }),
-    {
-      name: "auth-storage",
+      // Don't set user/tokens here - they need to confirm email first
+    } catch (error) {
+      set({
+        error: error instanceof Error ? error.message : "Signup failed",
+        isLoading: false,
+      });
+      throw error;
     }
-  )
-);
+  },
+
+  login: async (email: string, password: string) => {
+    set({ isLoading: true, error: null });
+    try {
+      const response = await apiClient.login(email, password);
+
+      // apiClient.login already stores tokens in localStorage
+      if (response.user) {
+        set({
+          user: response.user,
+          isAuthenticated: true,
+          isLoading: false,
+          error: null,
+        });
+      } else {
+        throw new Error("No user data returned from login");
+      }
+    } catch (error) {
+      set({
+        error: error instanceof Error ? error.message : "Login failed",
+        isLoading: false,
+        isAuthenticated: false,
+        user: null,
+      });
+      throw error;
+    }
+  },
+
+  logout: () => {
+    apiClient.logout();
+    set({
+      user: null,
+      isAuthenticated: false,
+      error: null,
+    });
+  },
+
+  clearError: () => {
+    set({ error: null });
+  },
+
+  setUser: (user: User | null) => {
+    set({
+      user,
+      isAuthenticated: !!user,
+    });
+  },
+
+  checkAuth: async () => {
+    if (typeof window === "undefined") return;
+
+    const accessToken = localStorage.getItem("access_token");
+    const refreshToken = localStorage.getItem("refresh_token");
+
+    if (!accessToken || !refreshToken) {
+      set({ isAuthenticated: false, user: null });
+      return;
+    }
+
+    try {
+      const response = await apiClient.getItems();
+
+      if (response.user) {
+        set({
+          user: response.user,
+          isAuthenticated: true,
+        });
+      } else {
+        throw new Error("No user data returned");
+      }
+    } catch (error) {
+      console.error("Auth check failed:", error);
+      apiClient.logout();
+      set({
+        user: null,
+        isAuthenticated: false,
+      });
+    }
+  },
+  initialize: async function () {
+    await this.checkAuth();
+  },
+}));
