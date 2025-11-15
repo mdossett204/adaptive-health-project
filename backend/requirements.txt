@@ -1,3 +1,8 @@
 modal
 supabase
 fastapi
+langchain
+langchain-openai
+langchain-anthropic
+langgraph
+langgraph-checkpoint-postgres
