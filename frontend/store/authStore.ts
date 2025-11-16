@@ -98,37 +98,46 @@ export const useAuthStore = create<AuthState>((set) => ({
   },
 
   checkAuth: async () => {
-    if (typeof window === "undefined") return;
+    set({ isLoading: true });
 
     const accessToken = localStorage.getItem("access_token");
     const refreshToken = localStorage.getItem("refresh_token");
+    const userJson = localStorage.getItem("user");
 
-    if (!accessToken || !refreshToken) {
-      set({ isAuthenticated: false, user: null });
+    if (!refreshToken || !userJson) {
+      set({ isAuthenticated: false, user: null, isLoading: false });
       return;
     }
 
     try {
-      const response = await apiClient.getItems();
+      const user: User = JSON.parse(userJson);
 
-      if (response.user) {
-        set({
-          user: response.user,
-          isAuthenticated: true,
-        });
-      } else {
-        throw new Error("No user data returned");
+      if (!accessToken) {
+        let refreshed;
+        try {
+          if (!apiClient.refreshPromise) {
+            apiClient.refreshPromise = apiClient.refreshToken();
+          }
+          refreshed = await apiClient.refreshPromise;
+        } finally {
+          apiClient.refreshPromise = null;
+        }
+
+        if (!refreshed || !refreshed.user) {
+          throw new Error("Failed to refresh token");
+        }
+        localStorage.setItem("user", JSON.stringify(refreshed.user));
+        set({ isAuthenticated: true, user: refreshed.user, isLoading: false });
+        return;
       }
+      set({ user: user, isAuthenticated: true, isLoading: false });
     } catch (error) {
-      console.error("Auth check failed:", error);
+      console.error("Failed to parse user data:", error);
       apiClient.logout();
-      set({
-        user: null,
-        isAuthenticated: false,
-      });
+      set({ isAuthenticated: false, user: null, isLoading: false });
     }
   },
-  initialize: async function () {
-    await this.checkAuth();
+  initialize: async () => {
+    await useAuthStore.getState().checkAuth();
   },
 }));
