@@ -170,7 +170,7 @@ def refresh_token(data:dict[str,str]) -> Dict[str, Any]:
     timeout=300  # 5 minutes for LLM responses
 )
 @web_endpoint(method="POST")
-def chat_endpoint(data: Dict) -> Tuple[Dict, int]:
+def chat_endpoint(data: Dict, user: Dict[str, Any] = Depends(verify_token)) -> Tuple[Dict, int]:
     """
     POST /chat - Chat with LLM (Claude or GPT)
     
@@ -296,7 +296,7 @@ Current question: {message}"""
     timeout=60
 )
 @web_endpoint(method="GET")
-def get_history_endpoint(data: Dict) -> Tuple[Dict, int]:
+def get_history_endpoint(data: Dict, user: Dict[str, Any] = Depends(verify_token)) -> Tuple[Dict, int]:
     """
     GET /history - Get conversation history for a session
     
@@ -364,7 +364,7 @@ def get_history_endpoint(data: Dict) -> Tuple[Dict, int]:
     timeout=60
 )
 @web_endpoint(method="DELETE")
-def clear_history_endpoint(data: Dict) -> Tuple[Dict, int]:
+def clear_history_endpoint(data: Dict, user: Dict[str, Any] = Depends(verify_token)) -> Tuple[Dict, int]:
     """
     DELETE /history - Clear conversation history for a session
     
@@ -412,7 +412,7 @@ def clear_history_endpoint(data: Dict) -> Tuple[Dict, int]:
     timeout=60
 )
 @web_endpoint(method="DELETE")
-def clear_user_data_endpoint(data: Dict) -> Tuple[Dict, int]:
+def clear_user_data_endpoint(data: Dict, user: Dict[str, Any] = Depends(verify_token)) -> Tuple[Dict, int]:
     """
     DELETE /user_data - Remove all stored context for a user
     
