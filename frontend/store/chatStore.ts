@@ -15,6 +15,8 @@ interface ChatState {
   isLoading: boolean;
   error: string | null;
   conversationLength: number;
+  limitReached: boolean;
+  limitExpiresAt: number | null;
 
   // Actions
   setModelType: (model: "gpt" | "claude") => void;
@@ -23,7 +25,8 @@ interface ChatState {
   clearChat: () => Promise<void>;
   clearUserData: () => Promise<void>;
   clearError: () => void;
-  reset: () => void;
+  clearSession: () => void;
+  checkLimit: () => boolean;
 }
 
 export const useChatStore = create<ChatState>((set, get) => ({
@@ -33,10 +36,17 @@ export const useChatStore = create<ChatState>((set, get) => ({
   isLoading: false,
   error: null,
   conversationLength: 0,
+  limitReached: false,
+  limitExpiresAt: null,
 
   setModelType: (model) => set({ modelType: model }),
 
   initializeSession: () => {
+    const existingSessionId = localStorage.getItem("session_id");
+    if (existingSessionId) {
+      set({ sessionId: existingSessionId });
+      return;
+    }
     const userStr = localStorage.getItem("user");
 
     if (!userStr) {
@@ -47,12 +57,36 @@ export const useChatStore = create<ChatState>((set, get) => ({
       const user = JSON.parse(userStr);
       const sessionId = `${user.id.substring(0, 6)}-${crypto.randomUUID()}`;
       set({ sessionId });
+      localStorage.setItem("session_id", sessionId);
     } catch {
       set({ error: "Failed to initialize session" });
     }
   },
 
   sendMessage: async (message: string) => {
+    const { conversationLength, limitReached } = get();
+
+    if (limitReached) {
+      const expiresAt = get().limitExpiresAt;
+      const hoursLeft = expiresAt
+        ? Math.ceil((expiresAt - Date.now()) / (1000 * 60 * 60))
+        : 4;
+      set({
+        error: `Message limit reached. Try again in ${hoursLeft} hour(s).`,
+      });
+      return;
+    }
+
+    if (conversationLength + 2 >= 10) {
+      // Set 4-hour cooldown
+      const expiresAt = Date.now() + 4 * 60 * 60 * 1000; // 4 hours in milliseconds
+      localStorage.setItem("limit_expires_at", expiresAt.toString());
+      set({
+        limitReached: true,
+        limitExpiresAt: expiresAt,
+      });
+    }
+
     const { sessionId, modelType, messages } = get();
 
     if (!sessionId) {
@@ -93,18 +127,27 @@ export const useChatStore = create<ChatState>((set, get) => ({
         modelType
       );
 
+      const data = Array.isArray(response) ? response[0] : response;
+
+      console.log("API Response:", data);
+      console.log("Message from API", data.message);
+
       const assistantMessage: Message = {
         role: "assistant",
-        content: response.message || "",
+        content: data.message || "",
         timestamp: new Date().toISOString(),
       };
+
+      console.log("Assistant Message Object:", assistantMessage);
 
       set({
         messages: [...get().messages, assistantMessage],
         conversationLength:
-          response.conversation_length || get().conversationLength + 2,
+          data.conversation_length || get().conversationLength + 2,
         isLoading: false,
       });
+
+      console.log("All messages after update:", get().messages);
     } catch (err) {
       set({
         error: err instanceof Error ? err.message : "Failed to send message",
@@ -150,7 +193,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     try {
       const user = JSON.parse(userStr);
       userId = user.id;
-    } catch (err) {
+    } catch {
       set({ error: "Failed to parse user data", isLoading: false });
       return;
     }
@@ -172,7 +215,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
   clearError: () => set({ error: null }),
 
-  reset: () =>
+  clearSession: () => {
+    localStorage.removeItem("session_id");
+    localStorage.removeItem("limit_expires_at");
     set({
       messages: [],
       sessionId: null,
@@ -180,5 +225,33 @@ export const useChatStore = create<ChatState>((set, get) => ({
       isLoading: false,
       error: null,
       conversationLength: 0,
-    }),
+      limitReached: false,
+      limitExpiresAt: null,
+    });
+  },
+
+  checkLimit: () => {
+    const limitTimestamp = localStorage.getItem("limit_expires_at");
+
+    if (limitTimestamp) {
+      const expiresAt = parseInt(limitTimestamp);
+      const now = Date.now();
+
+      if (now < expiresAt) {
+        set({
+          limitReached: true,
+          limitExpiresAt: expiresAt,
+        });
+        return true;
+      } else {
+        localStorage.removeItem("limit_expires_at");
+        set({
+          limitReached: false,
+          limitExpiresAt: null,
+        });
+        return false;
+      }
+    }
+    return false;
+  },
 }));

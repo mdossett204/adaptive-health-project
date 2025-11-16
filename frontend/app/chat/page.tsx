@@ -16,18 +16,22 @@ export default function ChatPage() {
     isLoading,
     error,
     conversationLength,
+    limitReached,
+    limitExpiresAt,
     setModelType,
     initializeSession,
     sendMessage,
     clearChat,
     clearUserData,
     clearError,
-    reset,
+    clearSession,
+    checkLimit,
   } = useChatStore();
 
   const [inputMessage, setInputMessage] = useState("");
   const [showModelSelector, setShowModelSelector] = useState(true);
   const [isCheckingAuth, setIsCheckingAuth] = useState(true);
+  const [timeRemaining, setTimeRemaining] = useState<string>("");
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   // Check authentication
@@ -50,8 +54,31 @@ export default function ChatPage() {
   useEffect(() => {
     if (isAuthenticated) {
       initializeSession();
+      checkLimit();
     }
-  }, [isAuthenticated, initializeSession]);
+  }, [isAuthenticated, initializeSession, checkLimit]);
+
+  // Countdown timer for limit
+  useEffect(() => {
+    if (limitReached && limitExpiresAt) {
+      const interval = setInterval(() => {
+        const now = Date.now();
+        const diff = limitExpiresAt - now;
+
+        if (diff <= 0) {
+          setTimeRemaining("");
+          checkLimit(); // Re-check, will clear the limit
+          clearInterval(interval);
+        } else {
+          const hours = Math.floor(diff / (1000 * 60 * 60));
+          const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
+          setTimeRemaining(`${hours}h ${minutes}m`);
+        }
+      }, 1000);
+
+      return () => clearInterval(interval);
+    }
+  }, [limitReached, limitExpiresAt, checkLimit]);
 
   // Auto-scroll to bottom
   useEffect(() => {
@@ -68,9 +95,11 @@ export default function ChatPage() {
 
     if (!inputMessage.trim()) return;
 
-    if (conversationLength >= MAX_MESSAGES) {
+    if (conversationLength + 2 >= MAX_MESSAGES || limitReached) {
       alert(
-        `You have reached the maximum of ${MAX_MESSAGES} messages. Please clear your chat to continue.`
+        `You have reached your message limit. ${
+          timeRemaining ? `Try again in ${timeRemaining}.` : "Try again later."
+        }`
       );
       return;
     }
@@ -96,19 +125,14 @@ export default function ChatPage() {
   };
 
   const handleLogout = () => {
-    reset();
+    clearSession();
     logout();
     router.push("/login");
   };
 
   const handleChangeModel = () => {
     if (messages.length > 0) {
-      if (
-        window.confirm(
-          "Changing models will clear your current chat. Continue?"
-        )
-      ) {
-        reset();
+      if (window.confirm("Switch AI model? Your conversation will continue.")) {
         setShowModelSelector(true);
       }
     } else {
@@ -149,6 +173,11 @@ export default function ChatPage() {
                       {conversationLength}/{MAX_MESSAGES} messages
                     </span>
                   )}
+                  {limitReached && timeRemaining && (
+                    <span className="px-3 py-1 bg-red-100 text-red-800 rounded-full text-sm font-medium">
+                      Cooldown: {timeRemaining}
+                    </span>
+                  )}
                 </>
               )}
             </div>
@@ -166,12 +195,14 @@ export default function ChatPage() {
                   >
                     Change Model
                   </button>
-                  <button
-                    onClick={handleClearChat}
-                    className="px-3 py-1 text-sm font-medium text-blue-600 hover:text-blue-700"
-                  >
-                    Clear Chat
-                  </button>
+                  {!limitReached && ( // ← Changed from dailyLimitReached
+                    <button
+                      onClick={handleClearChat}
+                      className="px-3 py-1 text-sm font-medium text-blue-600 hover:text-blue-700"
+                    >
+                      Clear Chat
+                    </button>
+                  )}
                   <button
                     onClick={handleClearUserData}
                     className="px-3 py-1 text-sm font-medium text-red-600 hover:text-red-700"
@@ -299,16 +330,20 @@ export default function ChatPage() {
                               : "bg-gray-100 text-gray-900"
                           }`}
                         >
-                          <div className="flex items-start gap-2">
-                            {msg.role === "assistant" && (
-                              <div className="flex-shrink-0 w-6 h-6 rounded-full bg-gray-300 flex items-center justify-center text-xs font-medium">
+                          {msg.role === "assistant" ? (
+                            <div className="flex items-start gap-2">
+                              <div className="flex-shrink-0 w-6 h-6 rounded-full bg-gray-300 flex items-center justify-center text-xs font-medium mt-0.5">
                                 AI
                               </div>
-                            )}
+                              <p className="whitespace-pre-wrap break-words flex-1">
+                                {msg.content}
+                              </p>
+                            </div>
+                          ) : (
                             <p className="whitespace-pre-wrap break-words">
                               {msg.content}
                             </p>
-                          </div>
+                          )}
                         </div>
                       </div>
                     ))}
@@ -325,8 +360,12 @@ export default function ChatPage() {
                     value={inputMessage}
                     onChange={(e) => setInputMessage(e.target.value)}
                     placeholder={
-                      conversationLength >= MAX_MESSAGES
-                        ? "Maximum messages reached. Please clear chat."
+                      limitReached || conversationLength >= MAX_MESSAGES
+                        ? `Limit reached. ${
+                            timeRemaining
+                              ? `Wait ${timeRemaining}`
+                              : "Wait 4 hours"
+                          }`
                         : "Type your message..."
                     }
                     disabled={isLoading || conversationLength >= MAX_MESSAGES}
@@ -368,10 +407,10 @@ export default function ChatPage() {
                     )}
                   </button>
                 </form>
-                {conversationLength >= MAX_MESSAGES && (
+                {(conversationLength >= MAX_MESSAGES || limitReached) && (
                   <p className="text-sm text-red-600 mt-2 text-center">
                     You have reached the maximum of {MAX_MESSAGES} messages.
-                    Clear your chat to continue.
+                    {timeRemaining && ` Wait ${timeRemaining} to continue.`}
                   </p>
                 )}
               </div>
