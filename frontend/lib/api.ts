@@ -1,9 +1,11 @@
+// lib/api.ts
 const ENDPOINTS = {
   SIGNUP: process.env.NEXT_PUBLIC_MODAL_SIGNUP_URL!,
   LOGIN: process.env.NEXT_PUBLIC_MODAL_LOGIN_URL!,
   REFRESH_TOKEN: process.env.NEXT_PUBLIC_MODAL_REFRESH_TOKEN_URL!,
-  CREATE_ITEM: process.env.NEXT_PUBLIC_MODAL_CREATE_ITEM_URL!,
-  GET_ITEMS: process.env.NEXT_PUBLIC_MODAL_GET_ITEM_URL!,
+  CHAT: process.env.NEXT_PUBLIC_MODAL_CHAT_URL!,
+  CLEAR_HISTORY: process.env.NEXT_PUBLIC_MODAL_CLEAR_HISTORY_URL!,
+  CLEAR_USER_DATA: process.env.NEXT_PUBLIC_MODAL_CLEAR_USER_DATA_URL!,
 };
 
 interface ApiResponse<T = unknown> {
@@ -22,8 +24,25 @@ interface AuthResponse extends ApiResponse {
   requiresEmailConfirmation?: boolean;
 }
 
+interface ChatResponse extends ApiResponse {
+  message?: string;
+  session_id?: string;
+  user_id?: string;
+  model?: string;
+  conversation_length?: number;
+  context_items_found?: number;
+  status?: string;
+}
+
+interface ClearResponse extends ApiResponse {
+  session_id?: string;
+  user_id?: string;
+  deleted_count?: number;
+  status?: string;
+}
+
 class ApiClient {
-  private refreshPromise: Promise<AuthResponse> | null = null;
+  public refreshPromise: Promise<AuthResponse> | null = null;
 
   private getHeaders(includeAuth: boolean = false): HeadersInit {
     const headers: HeadersInit = {
@@ -33,9 +52,7 @@ class ApiClient {
     if (includeAuth) {
       let token: string | null = null;
 
-      if (typeof window !== "undefined") {
-        token = localStorage.getItem("access_token");
-      }
+      token = localStorage.getItem("access_token");
 
       if (token) {
         headers["Authorization"] = `Bearer ${token}`;
@@ -58,25 +75,21 @@ class ApiClient {
         }
 
         await this.refreshPromise;
-        this.refreshPromise = null;
-
-        // Retry with new token - rebuild headers
-        const newInit = {
-          ...init,
-          headers: this.getHeaders(true),
-        };
-
-        return await fetch(input, newInit);
       } catch (error) {
         this.logout();
 
-        // Redirect to login or throw error for UI to handle
-        // if (typeof window !== "undefined") {
-        //   window.location.href = "/login";
-        // }
-
         throw error;
+      } finally {
+        this.refreshPromise = null;
       }
+      const newInit = {
+        ...init,
+        headers: {
+          ...init.headers,
+          ...this.getHeaders(true),
+        },
+      };
+      return await fetch(input, newInit);
     }
 
     return response;
@@ -109,23 +122,21 @@ class ApiClient {
     const data = await this.handleResponse<AuthResponse>(response);
 
     // Store tokens
-    if (typeof window !== "undefined") {
-      if (data.access_token) {
-        localStorage.setItem("access_token", data.access_token);
-      }
-      if (data.refresh_token) {
-        localStorage.setItem("refresh_token", data.refresh_token);
-      }
+
+    if (data.access_token) {
+      localStorage.setItem("access_token", data.access_token);
+    }
+    if (data.refresh_token) {
+      localStorage.setItem("refresh_token", data.refresh_token);
+    }
+    if (data.user) {
+      localStorage.setItem("user", JSON.stringify(data.user));
     }
 
     return data;
   }
 
   async refreshToken(): Promise<AuthResponse> {
-    if (typeof window === "undefined") {
-      throw new Error("Cannot refresh token on server side");
-    }
-
     const refreshToken = localStorage.getItem("refresh_token");
     if (!refreshToken) {
       throw new Error("No refresh token available");
@@ -146,32 +157,54 @@ class ApiClient {
     if (data.refresh_token) {
       localStorage.setItem("refresh_token", data.refresh_token);
     }
+    if (data.user) {
+      localStorage.setItem("user", JSON.stringify(data.user));
+    }
 
     return data;
   }
 
-  async createItem(item: Record<string, unknown>): Promise<ApiResponse> {
-    const response = await this.fetchWithAuthRetry(ENDPOINTS.CREATE_ITEM, {
+  async chat(
+    message: string,
+    userId: string,
+    sessionId: string,
+    model: "gpt" | "claude"
+  ): Promise<ChatResponse> {
+    const response = await this.fetchWithAuthRetry(ENDPOINTS.CHAT, {
       method: "POST",
       headers: this.getHeaders(true),
-      body: JSON.stringify(item),
+      body: JSON.stringify({
+        message,
+        user_id: userId,
+        session_id: sessionId,
+        model,
+      }),
     });
-    return this.handleResponse<ApiResponse>(response);
+    return this.handleResponse<ChatResponse>(response);
   }
 
-  async getItems(): Promise<ApiResponse> {
-    const response = await this.fetchWithAuthRetry(ENDPOINTS.GET_ITEMS, {
-      method: "GET",
+  async clearHistory(sessionId: string): Promise<ClearResponse> {
+    const response = await this.fetchWithAuthRetry(ENDPOINTS.CLEAR_HISTORY, {
+      method: "DELETE",
       headers: this.getHeaders(true),
+      body: JSON.stringify({ session_id: sessionId }),
     });
-    return this.handleResponse<ApiResponse>(response);
+    return this.handleResponse<ClearResponse>(response);
+  }
+
+  async clearUserData(userId: string): Promise<ClearResponse> {
+    const response = await this.fetchWithAuthRetry(ENDPOINTS.CLEAR_USER_DATA, {
+      method: "DELETE",
+      headers: this.getHeaders(true),
+      body: JSON.stringify({ user_id: userId }),
+    });
+    return this.handleResponse<ClearResponse>(response);
   }
 
   logout() {
-    if (typeof window !== "undefined") {
-      localStorage.removeItem("access_token");
-      localStorage.removeItem("refresh_token");
-    }
+    localStorage.removeItem("access_token");
+    localStorage.removeItem("refresh_token");
+    localStorage.removeItem("user");
   }
 }
 
