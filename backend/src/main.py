@@ -5,7 +5,7 @@ from datetime import datetime
 from typing import Any, Dict, Optional, Tuple
 
 from fastapi import Depends, Header, HTTPException
-from modal import App, Image, Secret, web_endpoint, mount
+from modal import App, Image, Secret, web_endpoint
 from supabase import Client, create_client
 
 from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
@@ -165,7 +165,8 @@ def refresh_token(data:dict[str,str]) -> Dict[str, Any]:
 
 
 @app.function(
-    secrets=[Secret.from_name("database_url"),
+    secrets=[Secret.from_name("supabase-secret"),
+             Secret.from_name("database_url"),
              Secret.from_name("llm")],
     timeout=300  # 5 minutes for LLM responses
 )
@@ -292,7 +293,9 @@ Current question: {message}"""
 
 
 @app.function(
-    secrets=[Secret.from_name("database_url")],
+    secrets=[
+        Secret.from_name("supabase-secret"),
+        Secret.from_name("database_url")],
     timeout=60
 )
 @web_endpoint(method="GET")
@@ -360,7 +363,9 @@ def get_history_endpoint(data: Dict, user: Dict[str, Any] = Depends(verify_token
         }, 500
 
 @app.function(
-    secrets=[Secret.from_name("database_url")],
+    secrets=[
+        Secret.from_name("supabase-secret"),
+        Secret.from_name("database_url")],
     timeout=60
 )
 @web_endpoint(method="DELETE")
@@ -408,7 +413,9 @@ def clear_history_endpoint(data: Dict, user: Dict[str, Any] = Depends(verify_tok
 
 
 @app.function(
-    secrets=[Secret.from_name("database_url")],
+    secrets=[
+        Secret.from_name("supabase-secret"),
+        Secret.from_name("database_url")],
     timeout=60
 )
 @web_endpoint(method="DELETE")
