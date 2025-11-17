@@ -1,7 +1,7 @@
 import logging
 import os 
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any, Dict, Optional, Tuple
 
 from fastapi import Depends, Header, HTTPException
@@ -234,6 +234,28 @@ def chat_endpoint(data: Dict, user: Dict[str, Any] = Depends(verify_token)) -> T
              PostgresStore.from_conn_string(db_uri) as store,
              PostgresSaver.from_conn_string(db_uri) as checkpointer,
         ):
+            # check for rate limit 
+            rate_limit_items = list(store.search(("rate_limits",), filter={"user_id": user_id}))
+
+            if rate_limit_items:
+                rate_limit_data = rate_limit_items[0].value
+                limit_expires_at = datetime.fromisoformat(rate_limit_data["expires_at"])
+
+                if datetime.utcnow() < limit_expires_at:
+                    time_remaining = (limit_expires_at - datetime.utcnow()).total_seconds()
+                    hours_remaining = int(time_remaining // 3600)
+                    minutes_remaining = int((time_remaining % 3600) // 60)
+                    return{
+                        "error": f"Rate limit exceeded. Try again in {hours_remaining} hours and {minutes_remaining} minutes.",
+                        "status": "error",
+                        "rate_limited": True,
+                        "expires_at": limit_expires_at.isoformat(),
+                        "conversation_length": rate_limit_data.get("conversation_length", 10)
+                    }, 429
+                else:
+                    # Rate limit expired, remove it
+                    store.delete(namespace=("rate_limits",), key=user_id)
+
             # Get top 3 most relevant past messages for context
             relevant_context = get_stored_context(db_uri, user_id, message, limit=3)
             
@@ -272,23 +294,48 @@ Current question: {message}"""
             )
             
             last_message = result["messages"][-1]
-            
-            return {
+            conversation_length = len(result["messages"])
+
+            rate_limited = False
+            expires_at = None
+
+            if conversation_length >= 10:
+                # Apply rate limit for 1 hour
+                expires_at = (datetime.utcnow() + timedelta(hours=4)).isoformat()
+                store.put(
+                    namespace=("rate_limits",),
+                    key=user_id,
+                    value={
+                        "user_id": user_id,
+                        "conversation_length": conversation_length,
+                        "expires_at": expires_at,
+                        "set_at": datetime.utcnow().isoformat()
+                    }
+                )
+                rate_limited = True 
+            response = {
                 "message": last_message.content,
                 "session_id": session_id,
                 "user_id": user_id,
                 "model": model_type,
-                "conversation_length": len(result["messages"]),
+                "conversation_length": conversation_length,
                 "context_items_found": len(relevant_context),
+                "rate_limited": rate_limited,
                 "status": "success"
-            }, 200
+            }
+
+            if rate_limited:
+                response["expires_at"] = expires_at
+            
+            return response , 200
             
     except Exception as e:
         logger.error(f"Chat error: {str(e)}", exc_info=True)
         return {
             "error": "An error occurred during chat",
             "detail": str(e),
-            "status": "error"
+            "status": "error",
+            "rate_limited": False,
         }, 500
 
 
@@ -379,6 +426,7 @@ def clear_history_endpoint(data: Dict, user: Dict[str, Any] = Depends(verify_tok
     }
     """
     session_id = data.get("session_id")
+    user_id = user.get("id")
     
     if not session_id:
         return {
@@ -395,20 +443,42 @@ def clear_history_endpoint(data: Dict, user: Dict[str, Any] = Depends(verify_tok
         }, 500
     
     try:
-        with PostgresSaver.from_conn_string(db_uri) as checkpointer:
+        with (
+            PostgresStore.from_conn_string(db_uri) as store,
+            PostgresSaver.from_conn_string(db_uri) as checkpointer
+        ):
+            rate_limit_items = list(store.search(("rate_limits",), filter={"user_id": user_id}))
+
+            if rate_limit_items:
+                rate_limit_data = rate_limit_items[0].value
+                limit_expires_at = datetime.fromisoformat(rate_limit_data["expires_at"])
+
+                if datetime.utcnow() < limit_expires_at:
+                    return {
+                        "error": "Cannot clear history while rate limited.",
+                        "status": "error",
+                        "rate_limited": True,
+                        "expires_at": limit_expires_at.isoformat(),
+                    }, 429 
+                else:
+                    # Rate limit expired, remove it
+                    store.delete(namespace=("rate_limits",), key=user_id)
+
             checkpointer.delete_thread(thread_id=session_id)
         
         return {
             "message": "Session history cleared",
             "session_id": session_id,
-            "status": "success"
+            "status": "success",
+            "rate_limited": False
         }, 200
         
     except Exception as e:
         logger.error(f"Clear history error: {str(e)}", exc_info=True)
         return {
             "error": str(e),
-            "status": "error"
+            "status": "error",
+            "rate_limited": False
         }, 500
 
 

@@ -32,6 +32,8 @@ interface ChatResponse extends ApiResponse {
   conversation_length?: number;
   context_items_found?: number;
   status?: string;
+  rate_limited?: boolean;
+  expires_at?: string;
 }
 
 interface ClearResponse extends ApiResponse {
@@ -39,6 +41,8 @@ interface ClearResponse extends ApiResponse {
   user_id?: string;
   deleted_count?: number;
   status?: string;
+  rate_limited?: boolean;
+  expires_at?: string;
 }
 
 class ApiClient {

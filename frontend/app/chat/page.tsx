@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { useAuthStore } from "@/store/authStore";
 import { useChatStore } from "@/store/chatStore";
 
-const MAX_MESSAGES = 10;
+const MAX_MESSAGES = 11;
 
 export default function ChatPage() {
   const router = useRouter();
@@ -25,7 +25,6 @@ export default function ChatPage() {
     clearUserData,
     clearError,
     clearSession,
-    checkLimit,
   } = useChatStore();
 
   const [inputMessage, setInputMessage] = useState("");
@@ -50,13 +49,11 @@ export default function ChatPage() {
     }
   }, [isAuthenticated, isCheckingAuth, router]);
 
-  // Generate session ID on mount
   useEffect(() => {
     if (isAuthenticated) {
       initializeSession();
-      checkLimit();
     }
-  }, [isAuthenticated, initializeSession, checkLimit]);
+  }, [isAuthenticated, initializeSession]);
 
   // Countdown timer for limit
   useEffect(() => {
@@ -67,7 +64,6 @@ export default function ChatPage() {
 
         if (diff <= 0) {
           setTimeRemaining("");
-          checkLimit(); // Re-check, will clear the limit
           clearInterval(interval);
         } else {
           const hours = Math.floor(diff / (1000 * 60 * 60));
@@ -78,7 +74,7 @@ export default function ChatPage() {
 
       return () => clearInterval(interval);
     }
-  }, [limitReached, limitExpiresAt, checkLimit]);
+  }, [limitReached, limitExpiresAt]);
 
   // Auto-scroll to bottom
   useEffect(() => {
