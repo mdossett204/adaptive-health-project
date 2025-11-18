@@ -4,6 +4,7 @@ import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { useAuthStore } from "@/store/authStore";
 import { useChatStore } from "@/store/chatStore";
+import { clear } from "console";
 
 const MAX_MESSAGES = 11;
 
@@ -25,6 +26,7 @@ export default function ChatPage() {
     clearUserData,
     clearError,
     clearSession,
+    clearRateLimit,
   } = useChatStore();
 
   const [inputMessage, setInputMessage] = useState("");
@@ -64,6 +66,7 @@ export default function ChatPage() {
 
         if (diff <= 0) {
           setTimeRemaining("");
+          clearRateLimit();
           clearInterval(interval);
         } else {
           const hours = Math.floor(diff / (1000 * 60 * 60));
@@ -74,7 +77,7 @@ export default function ChatPage() {
 
       return () => clearInterval(interval);
     }
-  }, [limitReached, limitExpiresAt]);
+  }, [limitReached, limitExpiresAt, clearRateLimit]);
 
   // Auto-scroll to bottom
   useEffect(() => {

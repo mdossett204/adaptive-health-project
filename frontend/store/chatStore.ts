@@ -26,6 +26,7 @@ interface ChatState {
   clearUserData: () => Promise<void>;
   clearError: () => void;
   clearSession: () => void;
+  clearRateLimit: () => Promise<void>;
 }
 
 export const useChatStore = create<ChatState>((set, get) => ({
@@ -116,10 +117,11 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
       console.log("API Response:", data);
       console.log("Message from API", data.message);
+      console.log("expire at", data.expires_at);
 
       if (data.rate_limited) {
         const expiresAt = data.expires_at
-          ? new Date(data.expires_at).getTime()
+          ? new Date(data.expires_at + "Z").getTime()
           : null;
         set({
           error: data.error || "You have been rate limited.",
@@ -218,5 +220,28 @@ export const useChatStore = create<ChatState>((set, get) => ({
       error: null,
       conversationLength: 0,
     });
+  },
+  clearRateLimit: async () => {
+    const { sessionId } = get();
+
+    if (!sessionId) {
+      console.error("No session ID found when clearing rate limit");
+      return;
+    }
+    try {
+      await apiClient.clearHistory(sessionId);
+      set({
+        limitReached: false,
+        limitExpiresAt: null,
+        conversationLength: 0,
+        messages: [],
+      });
+    } catch (err) {
+      console.error("Failed to clear rate limit:", err);
+      set({
+        limitReached: false,
+        limitExpiresAt: null,
+      });
+    }
   },
 }));

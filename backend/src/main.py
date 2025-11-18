@@ -299,7 +299,7 @@ Current question: {message}"""
             rate_limited = False
             expires_at = None
 
-            if conversation_length >= 10:
+            if conversation_length > 10:
                 # Apply rate limit for 1 hour
                 expires_at = (datetime.utcnow() + timedelta(hours=4)).isoformat()
                 store.put(
