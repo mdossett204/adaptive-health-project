@@ -4,7 +4,6 @@ import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { useAuthStore } from "@/store/authStore";
 import { useChatStore } from "@/store/chatStore";
-import { clear } from "console";
 
 const MAX_MESSAGES = 11;
 
@@ -194,14 +193,14 @@ export default function ChatPage() {
                   >
                     Change Model
                   </button>
-                  {!limitReached && ( // ← Changed from dailyLimitReached
-                    <button
-                      onClick={handleClearChat}
-                      className="px-3 py-1 text-sm font-medium text-blue-600 hover:text-blue-700"
-                    >
-                      Clear Chat
-                    </button>
-                  )}
+
+                  <button
+                    onClick={handleClearChat}
+                    className="px-3 py-1 text-sm font-medium text-blue-600 hover:text-blue-700"
+                  >
+                    Clear Chat
+                  </button>
+
                   <button
                     onClick={handleClearUserData}
                     className="px-3 py-1 text-sm font-medium text-red-600 hover:text-red-700"
