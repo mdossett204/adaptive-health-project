@@ -245,3 +245,41 @@ export const useChatStore = create<ChatState>((set, get) => ({
     }
   },
 }));
+// Expose a small, convenient debug API in development for use in the browser console.
+// Note: guarded by typeof window and NODE_ENV to avoid server-side errors and to
+// prevent exposing internals in production.
+declare global {
+  interface Window {
+    useChatStore?: typeof useChatStore;
+    __chat?: {
+      getState: () => ChatState;
+      sendMessage: (message: string) => Promise<void>;
+      initializeSession: () => void;
+      clearChat: () => void;
+      clearUserData: () => Promise<void>;
+      clearSession: () => void;
+      clearRateLimit: () => Promise<void>;
+      setModelType: (model: "gpt" | "claude") => void;
+    };
+  }
+}
+
+if (typeof window !== "undefined" && process.env.NODE_ENV !== "production") {
+  // Attach the raw hook (useful if you want the hook itself)
+  (window as unknown as Window).useChatStore = useChatStore;
+
+  // Attach a friendly helper for console testing that exposes live state and
+  // action wrappers. Use window.__chat.getState() to read the latest state.
+  (window as unknown as Window).__chat = {
+    getState: () => useChatStore.getState(),
+    sendMessage: (message: string) =>
+      useChatStore.getState().sendMessage(message),
+    initializeSession: () => useChatStore.getState().initializeSession(),
+    clearChat: () => useChatStore.getState().clearChat(),
+    clearUserData: () => useChatStore.getState().clearUserData(),
+    clearSession: () => useChatStore.getState().clearSession(),
+    clearRateLimit: () => useChatStore.getState().clearRateLimit(),
+    setModelType: (model: "gpt" | "claude") =>
+      useChatStore.getState().setModelType(model),
+  };
+}

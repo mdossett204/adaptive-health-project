@@ -88,11 +88,14 @@ class ApiClient {
       }
       const newInit = {
         ...init,
-        headers: {
-          ...init.headers,
-          ...this.getHeaders(true),
-        },
+        headers: this.getHeaders(true),
       };
+
+      console.log(
+        `Retrying request with new access token after refresh ${JSON.stringify(
+          newInit
+        )}`
+      );
       return await fetch(input, newInit);
     }
 
@@ -213,3 +216,49 @@ class ApiClient {
 }
 
 export const apiClient = new ApiClient();
+
+// Expose a small dev-only API on window for debugging / console testing.
+// Guarded to avoid server-side errors and to prevent exposing internals in production.
+declare global {
+  interface Window {
+    apiClient?: typeof apiClient;
+    __api?: {
+      signup: (email: string, password: string) => Promise<AuthResponse>;
+      login: (email: string, password: string) => Promise<AuthResponse>;
+      refreshToken: () => Promise<AuthResponse>;
+      chat: (
+        message: string,
+        userId: string,
+        sessionId: string,
+        model: "gpt" | "claude"
+      ) => Promise<ChatResponse>;
+      clearHistory: (sessionId: string) => Promise<ClearResponse>;
+      clearUserData: (userId: string) => Promise<ClearResponse>;
+      logout: () => void;
+      // helper to inspect endpoint URLs
+      ENDPOINTS: typeof ENDPOINTS;
+    };
+  }
+}
+
+if (typeof window !== "undefined" && process.env.NODE_ENV !== "production") {
+  const w = window as unknown as Window;
+  w.apiClient = apiClient;
+  w.__api = {
+    signup: (email: string, password: string) =>
+      apiClient.signup(email, password),
+    login: (email: string, password: string) =>
+      apiClient.login(email, password),
+    refreshToken: () => apiClient.refreshToken(),
+    chat: (
+      message: string,
+      userId: string,
+      sessionId: string,
+      model: "gpt" | "claude"
+    ) => apiClient.chat(message, userId, sessionId, model),
+    clearHistory: (sessionId: string) => apiClient.clearHistory(sessionId),
+    clearUserData: (userId: string) => apiClient.clearUserData(userId),
+    logout: () => apiClient.logout(),
+    ENDPOINTS,
+  };
+}
