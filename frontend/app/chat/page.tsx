@@ -93,7 +93,7 @@ export default function ChatPage() {
 
     if (!inputMessage.trim()) return;
 
-    if (conversationLength + 2 >= MAX_MESSAGES || limitReached) {
+    if (conversationLength > MAX_MESSAGES || limitReached) {
       alert(
         `You have reached your message limit. ${
           timeRemaining ? `Try again in ${timeRemaining}.` : "Try again later."
