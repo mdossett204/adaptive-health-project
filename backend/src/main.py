@@ -1,12 +1,12 @@
 import logging
 import os 
 import uuid
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Optional, Tuple
 
 from fastapi import Depends, Header, HTTPException
 from fastapi.responses import JSONResponse
-from modal import App, Image, Secret, web_endpoint
+from modal import App, Image, Secret, fastapi_endpoint
 from supabase import Client, create_client
 
 from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
@@ -39,6 +39,8 @@ image = Image.debian_slim(python_version="3.12").pip_install(
 app = App("backend-app", 
           image=image)
 
+def utcnow():
+    return datetime.now(timezone.utc)
 
 def get_supabase_client() -> Client:
     return create_client(
@@ -67,35 +69,10 @@ def verify_token(authorization: Optional[str] = Header(None)) -> Dict[str, Any]:
         handle_exception(e, "Invalid or expired token", 401)
 
 
-# @app.function(
-#     secrets=[Secret.from_name("supabase-secret")]
-# )
-# @web_endpoint(method="POST")
-# def create_item(item: Dict[str,Any], user: Dict[str, Any] = Depends(verify_token)) -> Dict[str, Any]:
-#     try:
-#         supabase_client = get_supabase_client()
-#         result = supabase_client.table("items").insert(item).execute()
-#         return {"success": True, "user": user, "data": result.data}
-#     except Exception as e:
-#         handle_exception(e, "Error inserting item.")
-
-# @app.function(
-#     secrets=[Secret.from_name("supabase-secret")]
-# )
-# @web_endpoint(method="GET")
-# def get_items(user: Dict[str, Any] = Depends(verify_token)) -> Dict[str, Any]:
-#     """Example: Get all items from Supabase"""
-#     try:
-#         supabase_client = get_supabase_client()
-#         result = supabase_client.table("items").select("*").execute()
-#         return {"success": True,  "user": user, "data": result.data}
-#     except Exception as e:
-#         handle_exception(e, "Error fetching items.")
-
 @app.function(
     secrets=[Secret.from_name("supabase-secret")]
 )
-@web_endpoint(method="POST")
+@fastapi_endpoint(method="POST")
 def signup(data: Dict[str,str]) -> Dict[str, Any]: 
     logger.info(f"signup called for email={data.get('email')}")
     try:
@@ -124,7 +101,7 @@ def signup(data: Dict[str,str]) -> Dict[str, Any]:
 @app.function(
     secrets=[Secret.from_name("supabase-secret")]
 )
-@web_endpoint(method="POST")
+@fastapi_endpoint(method="POST")
 def login(data: Dict[str,str]) -> Dict[str, Any]: 
     logger.info(f"login called for email={data.get('email')}")
     try:
@@ -154,7 +131,7 @@ def login(data: Dict[str,str]) -> Dict[str, Any]:
 @app.function(
     secrets=[Secret.from_name("supabase-secret")]
 )
-@web_endpoint(method="POST")
+@fastapi_endpoint(method="POST")
 def refresh_token(data:dict[str,str]) -> Dict[str, Any]:
     logger.info("refresh_token called")
     try:
@@ -183,7 +160,7 @@ def refresh_token(data:dict[str,str]) -> Dict[str, Any]:
              Secret.from_name("llm")],
     timeout=300  # 5 minutes for LLM responses
 )
-@web_endpoint(method="POST")
+@fastapi_endpoint(method="POST")
 def chat_endpoint(data: Dict, user: Dict[str, Any] = Depends(verify_token)) -> Dict:
     """
     POST /chat - Chat with LLM (Claude or GPT)
@@ -200,14 +177,15 @@ def chat_endpoint(data: Dict, user: Dict[str, Any] = Depends(verify_token)) -> D
     model_type = data.get("model", "gpt").lower()
     session_id = data.get("session_id")
     user_id = data.get("user_id")
+    verified_user_id = user.get("id")
     
     logger.info(f"chat_endpoint called for user={user_id} session={session_id} model={model_type}")
     
     # Validation
-    if not user_id:
+    if not user_id or verified_user_id != user_id:
         return JSONResponse(
             content={
-                "error": "user_id is required",
+                "error": "valid user_id is required",
                 "status": "error",
             },
             status_code=400,
@@ -272,10 +250,10 @@ def chat_endpoint(data: Dict, user: Dict[str, Any] = Depends(verify_token)) -> D
 
             if rate_limit_items:
                 rate_limit_data = rate_limit_items[0].value
-                limit_expires_at = datetime.fromisoformat(rate_limit_data["expires_at"])
+                limit_expires_at = datetime.fromisoformat(rate_limit_data["expires_at"]).replace(tzinfo=timezone.utc)
 
-                if datetime.utcnow() < limit_expires_at:
-                    time_remaining = (limit_expires_at - datetime.utcnow()).total_seconds()
+                if utcnow() < limit_expires_at:
+                    time_remaining = (limit_expires_at - utcnow()).total_seconds()
                     hours_remaining = int(time_remaining // 3600)
                     minutes_remaining = int((time_remaining % 3600) // 60)
                     return JSONResponse(
@@ -324,7 +302,7 @@ Current question: {message}"""
                 key=str(uuid.uuid4()), 
                 value={
                     "data": message,
-                    "timestamp": datetime.utcnow().isoformat(),  # Changed to utcnow for consistency
+                    "timestamp": utcnow().isoformat(),  # Changed to utcnow() for consistency
                     "session_id": session_id
                 }
             )
@@ -336,8 +314,8 @@ Current question: {message}"""
             expires_at = None
 
             if conversation_length > 10:
-                # Apply rate limit for 1 hour
-                expires_at = (datetime.utcnow() + timedelta(hours=4)).isoformat()
+                # Apply rate limit for 4 hour
+                expires_at = (utcnow() + timedelta(hours=4)).isoformat()
                 store.put(
                     namespace=("rate_limits",),
                     key=user_id,
@@ -345,7 +323,7 @@ Current question: {message}"""
                         "user_id": user_id,
                         "conversation_length": conversation_length,
                         "expires_at": expires_at,
-                        "set_at": datetime.utcnow().isoformat()
+                        "set_at": utcnow().isoformat()
                     }
                 )
                 rate_limited = True 
@@ -384,123 +362,35 @@ Current question: {message}"""
         Secret.from_name("database_url")],
     timeout=60
 )
-@web_endpoint(method="GET")
-def get_history_endpoint(data: Dict, user: Dict[str, Any] = Depends(verify_token)) -> Dict:
-    """
-    GET /history - Get conversation history for a session
-    
-    Request body:
-    {
-        "session_id": "session-456"
-    }
-    """
-    session_id = data.get("session_id")
-    
-    logger.info(f"get_history_endpoint called for session={session_id}")
-    
-    if not session_id:
-        return JSONResponse(
-            content={
-                "error": "session_id is required",
-                "status": "error"
-            },
-            status_code=400,
-        )
-    
-    db_uri = os.getenv("SUPABASE_DB_URL")
-    if not db_uri:
-        logger.error("SUPABASE_DB_URL environment variable not set")
-        return JSONResponse(
-            content={
-                "error": "Database configuration error",
-                "status": "error"
-            },
-            status_code=500,
-        )
-    
-    try:
-        with PostgresSaver.from_conn_string(db_uri) as checkpointer:
-            read_config = {"configurable": {"thread_id": session_id}}
-            message_history = list(checkpointer.list(read_config))
-        
-        if not message_history or len(message_history) == 0:
-            return JSONResponse(
-                content={
-                    "messages": [],
-                    "session_id": session_id,
-                    "conversation_length": 0,
-                    "status": "success"
-                },
-                status_code=200,
-            )
-        
-        all_messages = message_history[0].checkpoint["channel_values"]["messages"]
-        formatted_messages = []
-        
-        for msg in all_messages:
-            if isinstance(msg, HumanMessage):
-                formatted_messages.append({"role": "user", "content": msg.content})
-            elif isinstance(msg, AIMessage):
-                formatted_messages.append({"role": "assistant", "content": msg.content})
-            elif isinstance(msg, SystemMessage):
-                formatted_messages.append({"role": "system", "content": msg.content})
-        
-        return JSONResponse(
-            content={
-                "messages": formatted_messages,
-                "session_id": session_id,
-                "conversation_length": len(formatted_messages),
-                "status": "success"
-            },
-            status_code=200,
-        )
-        
-    except Exception as e:
-        logger.error(f"Get history error: {str(e)}", exc_info=True)
-        return JSONResponse(
-            content={
-                "error": str(e),
-                "status": "error"
-            },
-            status_code=500,
-        )
-
-@app.function(
-    secrets=[
-        Secret.from_name("supabase-secret"),
-        Secret.from_name("database_url")],
-    timeout=60
-)
-@web_endpoint(method="DELETE")
-def clear_history_endpoint(data: Dict, user: Dict[str, Any] = Depends(verify_token)) -> Tuple[Dict, int]:
+@fastapi_endpoint(method="DELETE")
+def clear_history_endpoint(session_id: str, user=Depends(verify_token)):
     """
     DELETE /history - Clear conversation history for a session
     
-    Request body:
-    {
-        "session_id": "session-456"
-    }
+    query_parameter 
+    "session_id": "session-456"
     """
-    session_id = data.get("session_id")
     user_id = user.get("id")
 
     # Log entry for debugging to ensure requests reach this function
     logger.info(f"clear_history_endpoint called for user={user_id} session_id={session_id}")
     
     if not session_id:
-        return {
-            "error": "session_id is required",
-            "status": "error"
-        }, 400
-    
+        return JSONResponse(
+            content={
+                "error":"session_id is required",
+                "status": "error"},
+            status_code=400)
     db_uri = os.getenv("SUPABASE_DB_URL")
     if not db_uri:
         logger.error("SUPABASE_DB_URL environment variable not set")
-        return {
-            "error": "Database configuration error",
-            "status": "error"
-        }, 500
-    
+        return JSONResponse(
+            content={
+                "error":"Database configuration error",
+                "status": "error"
+            },
+            status_code=500
+        )
     try:
         with (
             PostgresStore.from_conn_string(db_uri) as store,
@@ -510,9 +400,9 @@ def clear_history_endpoint(data: Dict, user: Dict[str, Any] = Depends(verify_tok
 
             if rate_limit_items:
                 rate_limit_data = rate_limit_items[0].value
-                limit_expires_at = datetime.fromisoformat(rate_limit_data["expires_at"])
+                limit_expires_at = datetime.fromisoformat(rate_limit_data["expires_at"]).replace(tzinfo=timezone.utc)
 
-                if datetime.utcnow() < limit_expires_at:
+                if utcnow() < limit_expires_at:
                     payload = {
                         "error": "Cannot clear history while rate limited.",
                         "status": "error",
@@ -538,21 +428,23 @@ def clear_history_endpoint(data: Dict, user: Dict[str, Any] = Depends(verify_tok
         
     except Exception as e:
         logger.error(f"Clear history error: {str(e)}", exc_info=True)
-        return {
-            "error": str(e),
-            "status": "error",
-            "rate_limited": False
-        }, 500
-
-
+        return JSONResponse(
+            content={
+                "error": "clear history error",
+                "status": "error",
+                "rate_limited": False
+            },
+            status_code=500
+        )
+    
 @app.function(
     secrets=[
         Secret.from_name("supabase-secret"),
         Secret.from_name("database_url")],
     timeout=60
 )
-@web_endpoint(method="DELETE")
-def clear_user_data_endpoint(data: Dict, user: Dict[str, Any] = Depends(verify_token)) -> Dict:
+@fastapi_endpoint(method="DELETE")
+def clear_user_data_endpoint(user_id: str, user=Depends(verify_token)):
     """
     DELETE /user_data - Remove all stored context for a user
     
@@ -561,14 +453,12 @@ def clear_user_data_endpoint(data: Dict, user: Dict[str, Any] = Depends(verify_t
         "user_id": "user-123"
     }
     """
-    user_id = data.get("user_id")
-    
     logger.info(f"clear_user_data_endpoint called for user={user_id}")
-    
-    if not user_id:
+    verified_user_id = user.get("id")
+    if not user_id or user_id != verified_user_id:
         return JSONResponse(
             content={
-                "error": "user_id is required",
+                "error": "valid user_id is required",
                 "status": "error"
             },
             status_code=400,
@@ -615,17 +505,3 @@ def clear_user_data_endpoint(data: Dict, user: Dict[str, Any] = Depends(verify_t
             },
             status_code=500,
         )
-
-
-@app.function()
-@web_endpoint(method="GET")
-def health_check() -> Dict[str, str]:
-    """Health check endpoint"""
-    logger.info("health_check called")
-    return JSONResponse(
-        content={
-            "status": "healthy",
-            "timestamp": datetime.utcnow().isoformat()
-        },
-        status_code=200,
-    )
