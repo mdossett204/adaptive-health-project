@@ -26,8 +26,8 @@ export default function LoginPage() {
     try {
       await login(email, password);
 
-      // Redirect to dashboard on successful login
-      router.push("/dashboard");
+      // Redirect to chat on successful login
+      router.push("/chat");
     } catch (err) {
       // Error is already set in the store
       console.error("Login failed:", err);
